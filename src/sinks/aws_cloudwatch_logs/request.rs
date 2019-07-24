@@ -107,34 +107,29 @@ impl Future for CloudwatchFuture {
                 State::Idle => {
                     if let Some(token) = self.token.take() {
                         self.state = State::Token(Some(token));
-                        continue;
                     } else {
                         trace!("Token does not exist; calling describe stream.");
                         let fut = self.describe_stream();
                         self.state = State::DescribeStream(fut);
-                        continue;
                     }
                 }
 
                 State::DescribeStream(fut) => {
                     let response = try_ready!(fut.poll().map_err(CloudwatchError::Describe));
 
-                    let stream = if let Some(stream) = response
+                    if let Some(stream) = response
                         .log_streams
                         .ok_or(CloudwatchError::NoStreamsFound)?
                         .into_iter()
                         .next()
                     {
                         trace!(message = "stream found", stream = ?stream.log_stream_name);
-                        stream
+                        self.state = State::Token(stream.upload_sequence_token);
                     } else {
                         trace!("provided stream does not exist; creating a new one.");
                         let fut = self.create_log_stream();
                         self.state = State::CreateStream(fut);
-                        continue;
                     };
-
-                    self.state = State::Token(stream.upload_sequence_token);
                 }
 
                 State::Token(token) => {
@@ -149,7 +144,6 @@ impl Future for CloudwatchFuture {
                     trace!(message = "putting logs.", ?token);
                     let fut = self.put_logs(token, events);
                     self.state = State::Put(fut);
-                    continue;
                 }
 
                 State::CreateStream(fut) => {
@@ -158,7 +152,6 @@ impl Future for CloudwatchFuture {
                     trace!("stream created.");
 
                     self.state = State::Idle;
-                    continue;
                 }
 
                 State::Put(fut) => {
