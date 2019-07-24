@@ -8,13 +8,17 @@ use rusoto_logs::{
 };
 
 pub struct CloudwatchFuture {
-    client: CloudWatchLogsClient,
+    client: Client,
     state: State,
-    stream_name: String,
-    group_name: String,
     events: Option<Vec<InputLogEvent>>,
     token: Option<String>,
     token_tx: mpsc::Sender<Option<String>>,
+}
+
+struct Client {
+    client: CloudWatchLogsClient,
+    stream_name: String,
+    group_name: String,
 }
 
 enum State {
@@ -34,17 +38,22 @@ impl CloudwatchFuture {
         token: Option<String>,
         token_tx: mpsc::Sender<Option<String>>,
     ) -> Self {
+        let client = Client {
+            client,
+            stream_name,
+            group_name,
+        };
         Self {
             client,
             events: Some(events),
             state: State::Idle,
-            stream_name,
-            group_name,
             token,
             token_tx,
         }
     }
+}
 
+impl Client {
     fn put_logs(
         &mut self,
         sequence_token: Option<String>,
@@ -109,7 +118,7 @@ impl Future for CloudwatchFuture {
                         self.state = State::Token(Some(token));
                     } else {
                         trace!("Token does not exist; calling describe stream.");
-                        let fut = self.describe_stream();
+                        let fut = self.client.describe_stream();
                         self.state = State::DescribeStream(fut);
                     }
                 }
@@ -127,7 +136,7 @@ impl Future for CloudwatchFuture {
                         self.state = State::Token(stream.upload_sequence_token);
                     } else {
                         trace!("provided stream does not exist; creating a new one.");
-                        let fut = self.create_log_stream();
+                        let fut = self.client.create_log_stream();
                         self.state = State::CreateStream(fut);
                     };
                 }
@@ -142,7 +151,7 @@ impl Future for CloudwatchFuture {
                         .expect("Token got called twice, this is a bug!");
 
                     trace!(message = "putting logs.", ?token);
-                    let fut = self.put_logs(token, events);
+                    let fut = self.client.put_logs(token, events);
                     self.state = State::Put(fut);
                 }
 
