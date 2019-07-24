@@ -22,7 +22,6 @@ struct Client {
 }
 
 enum State {
-    Idle,
     Token(Option<String>),
     CreateStream(RusotoFuture<(), CreateLogStreamError>),
     DescribeStream(RusotoFuture<DescribeLogStreamsResponse, DescribeLogStreamsError>),
@@ -43,10 +42,19 @@ impl CloudwatchFuture {
             stream_name,
             group_name,
         };
+
+        let state = match token.clone() {
+            Some(t) => State::Token(Some(t)),
+            None => {
+                trace!("Token does not exist; calling describe stream.");
+                State::DescribeStream(client.describe_stream())
+            }
+        };
+
         Self {
             client,
             events: Some(events),
-            state: State::Idle,
+            state,
             token,
             token_tx,
         }
@@ -111,16 +119,6 @@ impl Future for CloudwatchFuture {
 
         loop {
             match &mut self.state {
-                State::Idle => {
-                    if let Some(token) = self.token.take() {
-                        self.state = State::Token(Some(token));
-                    } else {
-                        trace!("Token does not exist; calling describe stream.");
-                        let fut = self.client.describe_stream();
-                        self.state = State::DescribeStream(fut);
-                    }
-                }
-
                 State::DescribeStream(fut) => {
                     let response = try_ready!(fut.poll().map_err(CloudwatchError::Describe));
 
@@ -158,7 +156,7 @@ impl Future for CloudwatchFuture {
 
                     trace!("stream created.");
 
-                    self.state = State::Idle;
+                    self.state = State::Token(None);
                 }
 
                 State::Put(fut) => {
