@@ -55,7 +55,7 @@ impl CloudwatchFuture {
 
 impl Client {
     fn put_logs(
-        &mut self,
+        &self,
         sequence_token: Option<String>,
         log_events: Vec<InputLogEvent>,
     ) -> RusotoFuture<PutLogEventsResponse, PutLogEventsError> {
@@ -69,9 +69,7 @@ impl Client {
         self.client.put_log_events(request)
     }
 
-    fn describe_stream(
-        &mut self,
-    ) -> RusotoFuture<DescribeLogStreamsResponse, DescribeLogStreamsError> {
+    fn describe_stream(&self) -> RusotoFuture<DescribeLogStreamsResponse, DescribeLogStreamsError> {
         let request = DescribeLogStreamsRequest {
             limit: Some(1),
             log_group_name: self.group_name.clone(),
@@ -82,7 +80,7 @@ impl Client {
         self.client.describe_log_streams(request)
     }
 
-    fn create_log_stream(&mut self) -> RusotoFuture<(), CreateLogStreamError> {
+    fn create_log_stream(&self) -> RusotoFuture<(), CreateLogStreamError> {
         let request = CreateLogStreamRequest {
             log_group_name: self.group_name.clone(),
             log_stream_name: self.stream_name.clone(),
