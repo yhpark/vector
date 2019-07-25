@@ -116,41 +116,40 @@ impl Future for CloudwatchFuture {
                         self.state = State::Token(stream.upload_sequence_token);
                     } else {
                         trace!("provided stream does not exist; creating a new one.");
-                        let fut = self.client.create_log_stream();
-                        self.state = State::CreateStream(fut);
+                        self.state = State::CreateStream(self.client.create_log_stream());
                     };
                 }
 
                 State::Token(token) => {
-                    // These both take since this call should only happen once per
-                    // future.
-                    let token = token.take();
                     let events = self
                         .events
                         .take()
                         .expect("Token got called twice, this is a bug!");
 
                     trace!(message = "putting logs.", ?token);
-                    let fut = self.client.put_logs(token, events);
-                    self.state = State::Put(fut);
+                    self.state = State::Put(self.client.put_logs(token.clone(), events));
                 }
 
                 State::CreateStream(fut) => {
-                    let _ = try_ready!(fut.poll().map_err(CloudwatchError::CreateStream));
+                    try_ready!(fut.poll().map_err(CloudwatchError::CreateStream));
 
                     trace!("stream created.");
 
+                    // None is a valid token for a newly created stream
                     self.state = State::Token(None);
                 }
 
                 State::Put(fut) => {
                     let res = try_ready!(fut.poll().map_err(CloudwatchError::Put));
-
                     let next_token = res.next_sequence_token;
 
                     trace!(message = "putting logs was successful.", ?next_token);
 
-                    self.token_tx.take().unwrap().send(next_token).unwrap();
+                    self.token_tx
+                        .take()
+                        .expect("Put returned twice, this is a bug!")
+                        .send(next_token)
+                        .unwrap();
 
                     return Ok(().into());
                 }
