@@ -21,7 +21,6 @@ struct Client {
 }
 
 enum State {
-    Token(Option<String>),
     CreateStream(RusotoFuture<(), CreateLogStreamError>),
     DescribeStream(RusotoFuture<DescribeLogStreamsResponse, DescribeLogStreamsError>),
     Put(RusotoFuture<PutLogEventsResponse, PutLogEventsError>),
@@ -42,20 +41,37 @@ impl CloudwatchFuture {
             group_name,
         };
 
-        let state = match token {
-            Some(t) => State::Token(Some(t)),
+        match token {
+            Some(t) => {
+                let fut = client.put_logs(Some(t), events);
+                Self {
+                    client,
+                    events: None,
+                    state: State::Put(fut),
+                    token_tx: Some(token_tx),
+                }
+            }
             None => {
                 trace!("Token does not exist; calling describe stream.");
-                State::DescribeStream(client.describe_stream())
+                let fut = client.describe_stream();
+                Self {
+                    client,
+                    events: Some(events),
+                    state: State::DescribeStream(fut),
+                    token_tx: Some(token_tx),
+                }
             }
-        };
-
-        Self {
-            client,
-            events: Some(events),
-            state,
-            token_tx: Some(token_tx),
         }
+    }
+
+    fn transition_to_put(&mut self, token: Option<String>) {
+        let events = self
+            .events
+            .take()
+            .expect("Put got called twice, this is a bug!");
+
+        trace!(message = "putting logs.", ?token);
+        self.state = State::Put(self.client.put_logs(token, events));
     }
 }
 
@@ -113,21 +129,11 @@ impl Future for CloudwatchFuture {
                         .next()
                     {
                         trace!(message = "stream found", stream = ?stream.log_stream_name);
-                        self.state = State::Token(stream.upload_sequence_token);
+                        self.transition_to_put(stream.upload_sequence_token);
                     } else {
                         trace!("provided stream does not exist; creating a new one.");
                         self.state = State::CreateStream(self.client.create_log_stream());
                     };
-                }
-
-                State::Token(token) => {
-                    let events = self
-                        .events
-                        .take()
-                        .expect("Token got called twice, this is a bug!");
-
-                    trace!(message = "putting logs.", ?token);
-                    self.state = State::Put(self.client.put_logs(token.clone(), events));
                 }
 
                 State::CreateStream(fut) => {
@@ -136,7 +142,7 @@ impl Future for CloudwatchFuture {
                     trace!("stream created.");
 
                     // None is a valid token for a newly created stream
-                    self.state = State::Token(None);
+                    self.transition_to_put(None);
                 }
 
                 State::Put(fut) => {
