@@ -59,8 +59,12 @@ pub struct CloudwatchLogsSvc {
     encoding: Option<Encoding>,
     stream_name: String,
     group_name: String,
-    token: Option<String>,
-    token_rx: Option<oneshot::Receiver<Option<String>>>,
+    state: State,
+}
+
+enum State {
+    Ready(Option<String>),
+    Waiting(oneshot::Receiver<Option<String>>),
 }
 
 type Svc = Buffer<
@@ -242,8 +246,7 @@ impl CloudwatchLogsSvc {
             encoding: config.encoding.clone(),
             stream_name,
             group_name,
-            token: None,
-            token_rx: None,
+            state: State::Ready(None),
         })
     }
 
@@ -278,22 +281,22 @@ impl Service<Vec<Event>> for CloudwatchLogsSvc {
     type Future = request::CloudwatchFuture;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        if let Some(in_flight) = &mut self.token_rx {
-            match in_flight.poll() {
-                Ok(Async::Ready(token)) => {
-                    self.token = token;
-                    self.token_rx = None;
-                    return Ok(().into());
+        match &mut self.state {
+            State::Ready(_) => Ok(().into()),
+            State::Waiting(in_flight) => {
+                match in_flight.poll() {
+                    Ok(Async::Ready(token)) => {
+                        self.state = State::Ready(token);
+                        return Ok(().into());
+                    }
+                    // TODO: Since we are not sending the token back on failure, we can currently get
+                    // stuck here on request errors in the CloudwatchFuture. To fix, switch to
+                    // a oneshot channel and watch for the sender to get dropped. It's not worth
+                    // reusing the token from a failed request anyway.
+                    Ok(Async::NotReady) => return Ok(Async::NotReady),
+                    Err(e) => panic!("token stream error {:?}", e),
                 }
-                // TODO: Since we are not sending the token back on failure, we can currently get
-                // stuck here on request errors in the CloudwatchFuture. To fix, switch to
-                // a oneshot channel and watch for the sender to get dropped. It's not worth
-                // reusing the token from a failed request anyway.
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => panic!("token stream error {:?}", e),
             }
-        } else {
-            Ok(().into())
         }
     }
 
@@ -305,17 +308,19 @@ impl Service<Vec<Event>> for CloudwatchLogsSvc {
             .collect::<Vec<_>>();
 
         let (tx, rx) = oneshot::channel();
-        self.token_rx = Some(rx);
-
-        debug!(message = "Sending events.", events = %events.len());
-        request::CloudwatchFuture::new(
-            self.client.clone(),
-            self.stream_name.clone(),
-            self.group_name.clone(),
-            events,
-            self.token.take(),
-            tx,
-        )
+        if let State::Ready(token) = std::mem::replace(&mut self.state, State::Waiting(rx)) {
+            debug!(message = "Sending events.", events = %events.len());
+            request::CloudwatchFuture::new(
+                self.client.clone(),
+                self.stream_name.clone(),
+                self.group_name.clone(),
+                events,
+                token,
+                tx,
+            )
+        } else {
+            panic!("called while in waiting state, this is a bug!");
+        }
     }
 }
 
