@@ -297,6 +297,10 @@ impl Service<Vec<Event>> for CloudwatchLogsSvc {
                     // hit this none case until CloudwatchLogSvc gets dropped.
                     unreachable!()
                 }
+                // TODO: Since we are not sending the token back on failure, we can currently get
+                // stuck here on request errors in the CloudwatchFuture. To fix, switch to
+                // a oneshot channel and watch for the sender to get dropped. It's not worth
+                // reusing the token from a failed request anyway.
                 Ok(Async::NotReady) => return Ok(Async::NotReady),
                 Err(e) => panic!("token stream error {:?}", e),
             }

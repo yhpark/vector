@@ -1,5 +1,5 @@
 use super::CloudwatchError;
-use futures::{sync::mpsc, Future, Poll};
+use futures::{sync::mpsc, try_ready, Future, Poll};
 use rusoto_core::RusotoFuture;
 use rusoto_logs::{
     CloudWatchLogs, CloudWatchLogsClient, CreateLogStreamError, CreateLogStreamRequest,
@@ -11,7 +11,6 @@ pub struct CloudwatchFuture {
     client: Client,
     state: State,
     events: Option<Vec<InputLogEvent>>,
-    token: Option<String>,
     token_tx: mpsc::Sender<Option<String>>,
 }
 
@@ -43,7 +42,7 @@ impl CloudwatchFuture {
             group_name,
         };
 
-        let state = match token.clone() {
+        let state = match token {
             Some(t) => State::Token(Some(t)),
             None => {
                 trace!("Token does not exist; calling describe stream.");
@@ -55,7 +54,6 @@ impl CloudwatchFuture {
             client,
             events: Some(events),
             state,
-            token,
             token_tx,
         }
     }
@@ -103,20 +101,6 @@ impl Future for CloudwatchFuture {
     type Error = CloudwatchError;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        macro_rules! try_ready {
-            ($e:expr) => {
-                match $e {
-                    Ok(futures::Async::Ready(t)) => t,
-                    Ok(futures::Async::NotReady) => return Ok(futures::Async::NotReady),
-                    Err(e) => {
-                        self.token_tx.try_send(self.token.take()).unwrap();
-
-                        return Err(From::from(e));
-                    }
-                }
-            };
-        }
-
         loop {
             match &mut self.state {
                 State::DescribeStream(fut) => {
