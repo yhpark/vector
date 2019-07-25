@@ -43,7 +43,9 @@ impl CloudwatchFuture {
 
         match token {
             Some(t) => {
-                let fut = client.put_logs(Some(t), events);
+                let token = Some(t);
+                trace!(message = "putting logs.", ?token);
+                let fut = client.put_logs(token, events);
                 Self {
                     client,
                     events: None,
