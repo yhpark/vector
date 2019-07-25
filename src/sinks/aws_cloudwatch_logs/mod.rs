@@ -12,7 +12,7 @@ use crate::{
     topology::config::{DataType, SinkConfig},
 };
 use bytes::Bytes;
-use futures::{stream::iter_ok, sync::mpsc, Async, Future, Poll, Sink, Stream};
+use futures::{stream::iter_ok, sync::oneshot, Async, Future, Poll, Sink};
 use rusoto_core::{
     request::{BufferedHttpResponse, HttpClient},
     Region,
@@ -60,9 +60,7 @@ pub struct CloudwatchLogsSvc {
     stream_name: String,
     group_name: String,
     token: Option<String>,
-    token_tx: mpsc::Sender<Option<String>>,
-    token_rx: mpsc::Receiver<Option<String>>,
-    in_flight: bool,
+    token_rx: Option<oneshot::Receiver<Option<String>>>,
 }
 
 type Svc = Buffer<
@@ -239,17 +237,13 @@ impl CloudwatchLogsSvc {
         let group_name = String::from_utf8_lossy(&key.group[..]).into_owned();
         let stream_name = String::from_utf8_lossy(&key.stream[..]).into_owned();
 
-        let (tx, rx) = mpsc::channel(1);
-
         Ok(CloudwatchLogsSvc {
             client,
             encoding: config.encoding.clone(),
             stream_name,
             group_name,
             token: None,
-            token_tx: tx,
-            token_rx: rx,
-            in_flight: false,
+            token_rx: None,
         })
     }
 
@@ -284,18 +278,12 @@ impl Service<Vec<Event>> for CloudwatchLogsSvc {
     type Future = request::CloudwatchFuture;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        if self.in_flight {
-            match self.token_rx.poll() {
-                Ok(Async::Ready(Some(token))) => {
-                    self.in_flight = false;
+        if let Some(in_flight) = &mut self.token_rx {
+            match in_flight.poll() {
+                Ok(Async::Ready(token)) => {
                     self.token = token;
+                    self.token_rx = None;
                     return Ok(().into());
-                }
-                Ok(Async::Ready(None)) => {
-                    // Since we own one of the `tx` there will
-                    // always be one active one thus we will never
-                    // hit this none case until CloudwatchLogSvc gets dropped.
-                    unreachable!()
                 }
                 // TODO: Since we are not sending the token back on failure, we can currently get
                 // stuck here on request errors in the CloudwatchFuture. To fix, switch to
@@ -316,7 +304,8 @@ impl Service<Vec<Event>> for CloudwatchLogsSvc {
             .map(|e| self.encode_log(e))
             .collect::<Vec<_>>();
 
-        self.in_flight = true;
+        let (tx, rx) = oneshot::channel();
+        self.token_rx = Some(rx);
 
         debug!(message = "Sending events.", events = %events.len());
         request::CloudwatchFuture::new(
@@ -325,7 +314,7 @@ impl Service<Vec<Event>> for CloudwatchLogsSvc {
             self.group_name.clone(),
             events,
             self.token.take(),
-            self.token_tx.clone(),
+            tx,
         )
     }
 }
