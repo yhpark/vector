@@ -2,9 +2,12 @@ use crate::{
     buffers::Acker,
     event::{self, Event},
     region::RegionOrEndpoint,
-    sinks::util::{
-        retries::{FixedRetryPolicy, RetryLogic},
-        BatchServiceSink, SinkExt,
+    sinks::{
+        util::{
+            retries::{FixedRetryPolicy, RetryLogic},
+            BatchServiceSink, SinkExt,
+        },
+        Healthcheck, RouterSink,
     },
     topology::config::{DataType, SinkConfig},
 };
@@ -12,8 +15,8 @@ use futures::{stream::iter_ok, Future, Poll, Sink};
 use rand::random;
 use rusoto_core::RusotoFuture;
 use rusoto_kinesis::{
-    Kinesis, KinesisClient, ListStreamsInput, PutRecordsError, PutRecordsInput, PutRecordsOutput,
-    PutRecordsRequestEntry,
+    DescribeStreamError::ResourceNotFound, DescribeStreamInput, Kinesis, KinesisClient,
+    PutRecordsError, PutRecordsInput, PutRecordsOutput, PutRecordsRequestEntry,
 };
 use serde::{Deserialize, Serialize};
 use snafu::Snafu;
@@ -59,7 +62,7 @@ pub enum Encoding {
 
 #[typetag::serde(name = "aws_kinesis_streams")]
 impl SinkConfig for KinesisSinkConfig {
-    fn build(&self, acker: Acker) -> crate::Result<(super::RouterSink, super::Healthcheck)> {
+    fn build(&self, acker: Acker) -> crate::Result<(RouterSink, Healthcheck)> {
         let config = self.clone();
         let sink = KinesisService::new(config, acker)?;
         let healthcheck = healthcheck(self.clone())?;
@@ -166,39 +169,46 @@ impl RetryLogic for KinesisRetryLogic {
 
 #[derive(Debug, Snafu)]
 enum HealthcheckError {
-    #[snafu(display("ListStreams failed: {}", source))]
-    ListStreamsFailed {
-        source: rusoto_kinesis::ListStreamsError,
+    #[snafu(display("Retrieval of stream description failed: {}", source))]
+    StreamRetrievalFailed {
+        source: rusoto_kinesis::DescribeStreamError,
     },
-    #[snafu(display("Stream names do not match, got {}, expected {}", name, stream_name))]
-    StreamNamesMismatch { name: String, stream_name: String },
     #[snafu(display(
         "Stream returned does not contain any streams that match {}",
         stream_name
     ))]
     NoMatchingStreamName { stream_name: String },
+    #[snafu(display("The stream ({}) is not ready to receive input", stream_name))]
+    StreamIsNotReady { stream_name: String },
 }
 
-fn healthcheck(config: KinesisSinkConfig) -> crate::Result<super::Healthcheck> {
+fn healthcheck(config: KinesisSinkConfig) -> crate::Result<crate::sinks::Healthcheck> {
     let client = KinesisClient::new(config.region.try_into()?);
     let stream_name = config.stream_name;
 
     let fut = client
-        .list_streams(ListStreamsInput {
-            exclusive_start_stream_name: Some(stream_name.clone()),
+        .describe_stream(DescribeStreamInput {
+            exclusive_start_shard_id: None,
             limit: Some(1),
+            stream_name,
         })
-        .map_err(|source| HealthcheckError::ListStreamsFailed { source }.into())
-        .and_then(move |res| Ok(res.stream_names.into_iter().next()))
-        .and_then(move |name| {
-            if let Some(name) = name {
-                if name == stream_name {
-                    Ok(())
-                } else {
-                    Err(HealthcheckError::StreamNamesMismatch { name, stream_name }.into())
+        .map_err(|source| match source {
+            ResourceNotFound(resource) => HealthcheckError::NoMatchingStreamName {
+                stream_name: resource,
+            }
+            .into(),
+            other => HealthcheckError::StreamRetrievalFailed { source: other }.into(),
+        })
+        .and_then(move |res| {
+            let description = res.stream_description;
+            let status = &description.stream_status[..];
+
+            match status {
+                "CREATING" | "DELETING" => Err(HealthcheckError::StreamIsNotReady {
+                    stream_name: description.stream_name,
                 }
-            } else {
-                Err(HealthcheckError::NoMatchingStreamName { stream_name }.into())
+                .into()),
+                _ => Ok(()),
             }
         });
 
