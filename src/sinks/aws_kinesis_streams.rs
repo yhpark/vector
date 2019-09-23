@@ -357,10 +357,10 @@ mod integration_tests {
 
         let (mut input_lines, events) = random_lines_with_stream(100, 11);
 
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
         let pump = sink.send_all(events);
         rt.block_on(pump).unwrap();
-
-        std::thread::sleep(std::time::Duration::from_secs(1));
 
         let timestamp = timestamp as f64 / 1000.0;
         let records = rt
