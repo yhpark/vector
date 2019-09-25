@@ -129,6 +129,7 @@ url = "1.7"
 base64 = "0.10.1"
 shiplift = { git = "https://github.com/LucioFranco/shiplift", branch = "timber" }
 owning_ref = "0.4.0"
+ordered-float = "1.0.2"
 
 [build-dependencies]
 prost-build = "0.4.0"
