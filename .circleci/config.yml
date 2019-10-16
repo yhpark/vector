@@ -115,6 +115,8 @@ jobs:
       - image: yandex/clickhouse-server:19
     steps:
       - checkout
+      - setup_remote_docker:
+          docker_layer_caching: true
       - run:
           command: >
             curl -Lo minikube
@@ -125,8 +127,6 @@ jobs:
 
             minikube start --vm-driver=none --cpus 2 --memory 2048
           name: Start minikube
-      - setup_remote_docker:
-          docker_layer_caching: true
       - run:
           name: Test
           command: cargo test --all --features docker kubernetes-integration-tests -- --test-threads 4
