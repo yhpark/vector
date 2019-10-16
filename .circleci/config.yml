@@ -95,9 +95,9 @@ jobs:
           command: |
             sudo -E minikube start --vm-driver=none --cpus 2 --memory 2048 --kubernetes-version=${K8S_VERSION} &> $HOME/minikube.log 2>&1 < /dev/null
       - run:
-        command: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -- -y
+          command: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -- -y
       - run:
-        command: kubectl cluster-info
+          command: kubectl cluster-info
 
 
   test-stable:
@@ -152,7 +152,7 @@ jobs:
           docker_layer_caching: true
       - run:
           name: Test
-          command: cargo test --all --features docker kubernetes-integration-tests -- --test-threads 4
+          command: cargo test --all --features docker -- --test-threads 4
       - store_test_results:
           path: ./test-results
 
