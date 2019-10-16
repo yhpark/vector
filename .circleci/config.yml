@@ -115,7 +115,6 @@ jobs:
       - image: yandex/clickhouse-server:19
     steps:
       - checkout
-      - kube-orb/install-kubectl
       - run:
           command: >
             curl -Lo minikube
