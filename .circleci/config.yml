@@ -684,7 +684,7 @@ workflows:
       - test-stable:
           <<: *release-filters
       - test-stable-minikube:
-        <<: *release-filters
+          <<: *release-filters
 
       # Build & verify
 
