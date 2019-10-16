@@ -121,15 +121,15 @@ jobs:
             https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
             \
               && chmod +x minikube
-            sudo cp minikube /usr/local/bin && rm minikube
+            cp minikube /usr/local/bin && rm minikube
 
-            sudo -E minikube start --vm-driver=none --cpus 2 --memory 2048
+            minikube start --vm-driver=none --cpus 2 --memory 2048
           name: Start minikube
       - setup_remote_docker:
           docker_layer_caching: true
       - run:
           name: Test
-          command: cargo test --all --features docker -- --test-threads 4
+          command: cargo test --all --features docker kubernetes-integration-tests -- --test-threads 4
       - store_test_results:
           path: ./test-results
 
