@@ -96,10 +96,12 @@ jobs:
             curl http://127.0.0.1:10080/config > ~/.kube/config
             echo "Kubernetes ready - run tests!"
       - run:
-          command: curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
+          command: |
+            curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
+            source $HOME/.cargo/env
       - run:
           name: Run tests
-          command: cargo test kubernetes --features kubernetes-integration-tests
+          command: cargo test kubernetes --no-default-features --features kubernetes-integration-tests
 
 
   test-stable:
