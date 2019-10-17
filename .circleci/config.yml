@@ -95,9 +95,9 @@ jobs:
             done
             echo "Kubernetes ready - run tests!"
       - run:
-          command: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -- -y
+          command: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
       - run:
-          command: kubectl cluster-info
+          name: Fetch kube config
 
 
   test-stable:
