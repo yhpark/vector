@@ -97,8 +97,10 @@ jobs:
             echo "Kubernetes ready - run tests!"
       - run:
           command: |
-            curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
-            source $HOME/.cargo/env
+            curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain none
+            rustup install stable
+            rustup default stable
+            export PATH=$PATH:$HOME/.cargo/bin
       - run:
           name: Run tests
           command: cargo test kubernetes --no-default-features --features kubernetes-integration-tests
