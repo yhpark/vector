@@ -118,6 +118,9 @@ jobs:
       - setup_remote_docker:
           docker_layer_caching: true
       - run:
+          name: Install docker
+          run: curl https://get.docker.com | sh
+      - run:
           name: Setup Kubernetes cluster
           command: |
             docker run -d --name kube --privileged -p 8443:8443 -p 10080:10080 bsycorp/kind:latest-1.9
