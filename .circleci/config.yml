@@ -101,10 +101,12 @@ jobs:
             source $HOME/.cargo/env
             rustup install stable
             rustup default stable
-            export PATH=$PATH:$HOME/.cargo/bin
+
       - run:
           name: Run tests
-          command: cargo test kubernetes --no-default-features --features kubernetes-integration-tests
+          command: |
+            export PATH=$PATH:$HOME/.cargo/bin
+            cargo test kubernetes --no-default-features --features kubernetes-integration-tests
 
 
   test-stable:
