@@ -93,11 +93,13 @@ jobs:
             until curl -s --fail http://127.0.0.1:10080/kubernetes-ready; do
               sleep 1;
             done
+            curl http://127.0.0.1:10080/config > ~/.kube/config
             echo "Kubernetes ready - run tests!"
       - run:
           command: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
       - run:
-          name: Fetch kube config
+          name: Run tests
+          command: cargo test kubernetes --features kubernetes-integration-tests
 
 
   test-stable:
